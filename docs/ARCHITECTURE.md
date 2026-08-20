@@ -1,246 +1,117 @@
 # Architecture du projet whyml-lsp
 
-Ce document décrit l'architecture globale du serveur LSP pour WhyML.
+Ce document a pour vocation de définir l'architecture du serveur LSP pour WhyML.
 
-## Vue d'ensemble
+## Questions ouvertes sur l'architecture
 
-Le projet suit une architecture modulaire en couches, conçue pour séparer clairement les responsabilités et faciliter la maintenance et l'extension.
+### Structure globale
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Client LSP                              │
-│  (VS Code, Vim, Emacs, etc.)                                  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     JSON-RPC Layer                             │
-│  - Gestion de la communication stdin/stdout                   │
-│  - Sérialisation/désérialisation des messages                 │
-│  - Dispatching des requêtes vers les handlers appropriés       │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      LSP Server Core                           │
-│  - Initialisation et cycle de vie du serveur                   │
-│  - Gestion des documents (TextDocumentManager)                 │
-│  - Gestion des workspaces                                      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│   Parser Layer   │ │ Semantic Layer   │ │  Services Layer   │
-│                 │ │                  │ │                  │
-│ - Lexing        │ │ - Symbol Table   │ │ - Completion     │
-│ - Parsing       │ │ - Type Checking  │ │ - Hover          │
-│ - AST Generation│ │ - Scope Analysis │ │ - Definition     │
-│ - Error Recovery│ │ - Dependency Graph│ │ - References     │
-└─────────────────┘ └─────────────────┘ │ - Diagnostics    │
-                                          │ - Document Symbols│
-                                          │ - Formatting     │
-                                          └─────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     WhyML Language Support                     │
-│  - Définitions des types AST WhyML                            │
-│  - Grammaire du langage                                        │
-│  - Spécificités sémantiques WhyML                             │
-└─────────────────────────────────────────────────────────────┘
-```
+- **Quelle architecture globale adopter ?**
+  - Architecture en couches (LSP → Server → Parser → Semantic → Services) ?
+  - Architecture modulaire avec des interfaces claires entre composants ?
+  - Architecture événementielle (event-driven) pour gérer les mises à jour de documents ?
 
-## Modules principaux
+- **Comment organiser les modules principaux ?**
+  - Faut-il séparer clairement la gestion du protocole LSP de la logique métier ?
+  - Comment structurer les dépendances entre modules (ex: Parser → Semantic → Services) ?
 
-### 1. Module `Lsp` - Infrastructure LSP
+---
 
-**Fichier** : `src/lsp/`
+### Communication LSP
 
-Ce module contient les types et fonctions de base pour le protocole LSP :
+- **Comment implémenter la couche de communication JSON-RPC ?**
+  - Utiliser une bibliothèque existante (ex: [lsp-server](https://github.com/ocaml/lsp-server)) ?
+  - Implémenter manuellement pour un contrôle total ?
 
-- `lsp_types.ml` : Définitions des types LSP (Request, Response, Notification, etc.)
-- `lsp_protocol.ml` : Implémentation du protocole JSON-RPC
-- `lsp_server.ml` : Serveur principal et boucle d'événements
+- **Quel mécanisme de sérialisation/désérialisation utiliser ?**
+  - Utiliser une bibliothèque JSON existante (ex: [yojson](https://github.com/ocaml-community/yojson)) ?
+  - Implémenter un parseur JSON personnalisé ?
 
-**Responsabilités** :
-- Communication avec le client via stdin/stdout
-- Sérialisation et désérialisation des messages JSON-RPC
-- Routage des requêtes vers les handlers appropriés
-- Gestion des capacités du serveur et du client
+---
 
-### 2. Module `Server` - Logique métier du serveur
+### Gestion des documents
 
-**Fichier** : `src/server/`
+- **Comment gérer l'état des documents ouverts ?**
+  - Maintenir une table des documents avec leur contenu et leur AST ?
+  - Comment gérer les mises à jour incrémentales des documents ?
 
-Contient la logique principale du serveur :
+- **Comment gérer les workspaces (dossiers) ?**
+  - Faut-il supporter les workspaces multi-racines ?
+  - Comment détecter et charger les fichiers pertinents dans un workspace ?
 
-- `server.ml` : Point d'entrée et initialisation
-- `document_manager.ml` : Gestion des documents ouverts
-- `workspace.ml` : Gestion des workspaces et fichiers
-- `state.ml` : État global du serveur
+---
 
-**Responsabilités** :
-- Maintenir l'état des documents ouverts
-- Coordonner les différentes couches (parser, semantic, services)
-- Gérer le cycle de vie des documents
+### Parsing
 
-### 3. Module `Parser` - Analyse syntaxique
+- **Comment implémenter le parser WhyML ?**
+  - Utiliser Menhir pour le parsing LR(1) ?
+  - Utiliser ocamlyacc pour une solution plus simple ?
+  - Implémenter un parser manuel pour plus de contrôle ?
 
-**Fichier** : `src/parser/`
+- **Comment gérer le lexing ?**
+  - Utiliser ocamllex ?
+  - Utiliser une alternative comme Sedlex ou Ulex ?
 
-Implémente l'analyse syntaxique du code WhyML :
+- **Faut-il supporter le parsing incrémental ?**
+  - Si oui, comment identifier les zones à re-parser après une modification ?
+  - Comment fusionner les résultats du parsing incrémental avec l'AST existant ?
 
-- `whyml_lexer.mll` : Analyseur lexical (généré par ocamllex)
-- `whyml_parser.mly` : Analyseur syntaxique (généré par menhir)
-- `whyml_ast.ml` : Définition de l'AST (Abstract Syntax Tree)
-- `whyml_parser.ml` : Module principal du parser
-- `error_recovery.ml` : Récupération d'erreurs et parsing incrémental
+---
 
-**Responsabilités** :
-- Transformer le code source en AST
-- Détecter les erreurs de syntaxe
-- Fournir des informations de position pour les diagnostics
-- Supporter le parsing incrémental pour les mises à jour de documents
+### Analyse sémantique
 
-### 4. Module `Semantic` - Analyse sémantique
+- **Comment structurer l'analyse sémantique ?**
+  - Table des symboles hiérarchique pour gérer les portées imbriquées ?
+  - Table des symboles plate pour simplifier l'implémentation ?
 
-**Fichier** : `src/semantic/`
+- **Comment gérer la vérification des types ?**
+  - Implémenter une vérification de types explicite (WhyML a des annotations de types) ?
+  - Ajouter de l'inférence de types pour plus de flexibilité ?
 
-Effectue l'analyse sémantique sur l'AST :
+- **Comment gérer les dépendances entre modules ?**
+  - Construire un graphe de dépendances pour l'ordre de compilation ?
+  - Comment gérer les modifications en cascade ?
 
-- `symbol_table.ml` : Table des symboles et résolution de noms
-- `type_checker.ml` : Vérification des types
-- `scope_analyzer.ml` : Analyse des portées (scopes)
-- `dependency_graph.ml` : Graphe de dépendances entre modules
-- `semantic_analyzer.ml` : Module principal d'analyse sémantique
+---
 
-**Responsabilités** :
-- Résoudre les références de symboles
-- Vérifier la cohérence des types
-- Détecter les erreurs sémantiques
-- Construire le graphe de dépendances
+### Services LSP
 
-### 5. Module `Services` - Services LSP
+- **Quels services LSP implémenter en priorité ?**
+  - Complétion (textDocument/completion) ?
+  - Hover (textDocument/hover) ?
+  - Définition (textDocument/definition) ?
+  - Références (textDocument/references) ?
+  - Diagnostics (textDocument/publishDiagnostics) ?
+  - Symboles du document (textDocument/documentSymbol) ?
+  - Formatage (textDocument/formatting) ?
 
-**Fichier** : `src/services/`
+- **Comment organiser les services ?**
+  - Un module par service ?
+  - Un module unique pour tous les services ?
 
-Implémente les différents services LSP :
+---
 
-- `completion.ml` : Autocomplétion
-- `hover.ml` : Information au survol
-- `definition.ml` : Aller à la définition
-- `references.ml` : Trouver les références
-- `diagnostics.ml` : Génération de diagnostics
-- `document_symbols.ml` : Symboles du document
-- `formatting.ml` : Formatage de code
-- `code_actions.ml` : Actions de code (refactoring)
+### Intégration avec WhyML
 
-**Responsabilités** :
-- Fournir les fonctionnalités LSP spécifiques
-- Utiliser les informations des couches parser et semantic
-- Retourner des résultats conformes au protocole LSP
+- **Comment représenter l'AST WhyML ?**
+  - Définir des types OCaml pour chaque constructeur WhyML ?
+  - Utiliser une représentation générique (ex: avec des variants) ?
 
-### 6. Module `Whyml` - Support du langage WhyML
+- **Comment gérer les spécificités de WhyML ?**
+  - Comment représenter les annotations de types ?
+  - Comment gérer les preuves et les contrats ?
+  - Comment intégrer avec Why3 pour la vérification formelle ?
 
-**Fichier** : `src/whyml/`
+---
 
-Contient les définitions spécifiques à WhyML :
+### Performances
 
-- `whyml_ast.ml` : Types AST spécifiques à WhyML
-- `whyml_types.ml` : Types du langage WhyML
-- `whyml_builtins.ml` : Définitions intégrées (builtins)
+- **Comment optimiser les performances ?**
+  - Utiliser de la mise en cache (AST, informations sémantiques, diagnostics) ?
+  - Implémenter du traitement par lots (batching) pour les modifications rapides ?
+  - Utiliser de l'évaluation paresseuse (Lazy.t) pour les calculs coûteux ?
 
-## Flux de traitement typique
-
-### 1. Ouverture d'un document
-
-```
-Client -> Server: textDocument/didOpen
-    │
-    ▼
-Server: Enregistre le document dans DocumentManager
-    │
-    ▼
-Parser: Analyse syntaxique du contenu
-    │
-    ▼
-Semantic: Analyse sémantique de l'AST
-    │
-    ▼
-Diagnostics: Génère les diagnostics (erreurs, avertissements)
-    │
-    ▼
-Server: Envoie textDocument/publishDiagnostics au client
-```
-
-### 2. Requête de complétion
-
-```
-Client -> Server: textDocument/completion
-    │
-    ▼
-Server: Récupère le document et la position
-    │
-    ▼
-Parser: Vérifie que l'AST est à jour
-    │
-    ▼
-Semantic: Récupère le contexte sémantique à la position
-    │
-    ▼
-Completion Service: Génère les suggestions de complétion
-    │
-    ▼
-Server: Retourne les résultats au client
-```
-
-### 3. Mise à jour d'un document
-
-```
-Client -> Server: textDocument/didChange
-    │
-    ▼
-Server: Met à jour le contenu du document
-    │
-    ▼
-Parser: Parse incrémentalement les changements
-    │
-    ▼
-Semantic: Met à jour l'analyse sémantique
-    │
-    ▼
-Diagnostics: Recalcule les diagnostics pour les zones affectées
-    │
-    ▼
-Server: Envoie textDocument/publishDiagnostics au client
-```
-
-## Décisions architecturales clés
-
-1. **Séparation des couches** : Chaque couche (LSP, Server, Parser, Semantic, Services) a une responsabilité claire et bien définie.
-
-2. **Parsing incrémental** : Pour améliorer les performances, le parser supporte les mises à jour incrémentales des documents.
-
-3. **Cache sémantique** : Les résultats de l'analyse sémantique sont mis en cache pour éviter de recalculer inutilement.
-
-4. **Approche déclarative** : Les définitions des types LSP et WhyML utilisent un style déclaratif pour faciliter la maintenance.
-
-5. **Gestion d'erreur robuste** : Chaque couche gère ses propres erreurs et fournit des informations de diagnostic utiles.
-
-## Intégration avec les outils existants
-
-Le projet peut s'intégrer avec :
-
-- **Why3** : Pour la vérification formelle des programmes WhyML
-- **Alt-Ergo** : Pour la résolution de contraintes
-- **Coq** : Pour les preuves formelles avancées
-
-## Évolution future
-
-L'architecture a été conçue pour permettre :
-
-- L'ajout de nouvelles fonctionnalités LSP sans modifier le cœur
-- Le support de nouvelles versions de WhyML
-- L'intégration avec d'autres outils de vérification formelle
-- L'extension à d'autres langages de la famille Why
+- **Comment gérer la concurrence ?**
+  - Utiliser Lwt pour les opérations asynchrones ?
+  - Utiliser Async ?
+  - Gérer manuellement les threads ?
